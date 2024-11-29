@@ -1,0 +1,33 @@
+name: Run News Scraper
+
+on:
+  schedule:
+    - cron: '0 */8 * * *'  # Runs every 8 hours
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run scraper
+      run: python feed.py
+    
+    - name: Commit and push if changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add new_articles.json new_articles.xml last_processed_links.json
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update news articles [automated]" && git push)
