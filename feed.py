@@ -65,33 +65,68 @@ def save_last_processed_links(links):
     with open(LAST_PROCESSED_FILE, 'w', encoding='utf-8') as f:
         json.dump(links, f, ensure_ascii=False, indent=4)
 
-# Function to save articles to XML
+# Function to save articles to RSS XML
 def save_articles_to_xml(articles, filename):
-    root = ET.Element("articles")
+    # Create the root RSS element
+    rss = ET.Element("rss", version="2.0")
+    
+    # Create channel element
+    channel = ET.SubElement(rss, "channel")
+    
+    # Add required channel elements
+    title = ET.SubElement(channel, "title")
+    title.text = "Gadwal News Feed"
+    
+    link = ET.SubElement(channel, "link")
+    link.text = "https://news.google.com/rss/search?q=gadwal"
+    
+    description = ET.SubElement(channel, "description")
+    description.text = "Latest news about Gadwal"
+    
+    language = ET.SubElement(channel, "language")
+    language.text = "en-US"
+    
+    # Add each article as an item
     for article in articles:
-        article_element = ET.SubElement(root, "article")
+        item = ET.SubElement(channel, "item")
+        
+        # Title (required)
+        item_title = ET.SubElement(item, "title")
+        item_title.text = article["title"]
+        
+        # Link (required)
+        item_link = ET.SubElement(item, "link")
+        item_link.text = article["link"]
+        
+        # Description (required)
+        item_description = ET.SubElement(item, "description")
+        # Create CDATA section for the content
+        item_description.text = f'<![CDATA[{article["text"][:500]}...]]>'
+        
+        # Publication date
+        if article["publish_date"]:
+            pubDate = ET.SubElement(item, "pubDate")
+            pubDate.text = article["publish_date"]
+        
+        # Author(s)
+        if article["author"]:
+            author = ET.SubElement(item, "author")
+            author.text = ", ".join(article["author"])
+        
+        # Image (using media:content namespace)
+        if article["top_image"]:
+            media = ET.SubElement(item, "media:content", 
+                                url=article["top_image"],
+                                medium="image",
+                                xmlns="http://search.yahoo.com/mrss/")
 
-        title = ET.SubElement(article_element, "title")
-        title.text = article["title"]
-
-        authors = ET.SubElement(article_element, "authors")
-        authors.text = ", ".join(article["author"] or [])
-
-        publish_date = ET.SubElement(article_element, "publish_date")
-        publish_date.text = article["publish_date"] or ""
-
-        text = ET.SubElement(article_element, "text")
-        text.text = article["text"]
-
-        top_image = ET.SubElement(article_element, "top_image")
-        top_image.text = article["top_image"]
-
-        link = ET.SubElement(article_element, "link")
-        link.text = article["link"]
-
-    tree = ET.ElementTree(root)
-    with open(filename, "wb") as f:
-        tree.write(f, encoding="utf-8", xml_declaration=True)
+    # Create the ElementTree and write to file
+    tree = ET.ElementTree(rss)
+    
+    # Add XML declaration and write with proper encoding
+    with open(filename, 'wb') as f:
+        f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
+        tree.write(f, encoding='utf-8', xml_declaration=False)
 
 # Main function
 if __name__ == "__main__":
