@@ -4,20 +4,30 @@ from newspaper import Article
 import json
 import os
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+import hashlib
+import time
 
 # File to store the last processed links
 LAST_PROCESSED_FILE = "last_processed_links.json"
 
 # Function to parse RSS feed and get links with their timestamps
-def get_links_from_rss(feed_url):
+def get_links_from_rss(feed_url, limit=50):
+    """Parse RSS feed and get links with their timestamps, limited to top N entries"""
     feed = feedparser.parse(feed_url)
-    return [
-        {"link": entry.link, "published": entry.published_parsed}
+    links = [
+        {"link": entry.link, "published": entry.published_parsed, "title": entry.title}
         for entry in feed.entries
     ]
+    # Sort by published date (newest first) and limit to top N
+    sorted_links = sorted(links, 
+                         key=lambda x: time.mktime(x["published"]) if x["published"] else 0, 
+                         reverse=True)
+    return sorted_links[:limit]
 
 # Function to decode Google News URLs using googlenewsdecoder
 def decode_google_news_links(links):
+    """Decode Google News URLs using googlenewsdecoder"""
     decoded_links = []
     for item in links:
         try:
@@ -25,7 +35,8 @@ def decode_google_news_links(links):
             if result.get("status"):  # Check if decoding was successful
                 decoded_links.append({
                     "link": result["decoded_url"],
-                    "published": item["published"]
+                    "published": item["published"],
+                    "title": item["title"]
                 })
             else:
                 print(f"Failed to decode link: {item['link']}")
@@ -128,49 +139,136 @@ def save_articles_to_xml(articles, filename):
         f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
         tree.write(f, encoding='utf-8', xml_declaration=False)
 
+# Add new function to generate unique hash for articles
+def generate_article_hash(article_data):
+    """Generate a unique hash based on article title and link"""
+    content = f"{article_data['title']}{article_data['link']}"
+    return hashlib.md5(content.encode()).hexdigest()
+
+# Add new function to load existing articles
+def load_existing_articles():
+    """Load existing articles from JSON file"""
+    try:
+        with open("new_articles.json", 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def check_for_updates(current_links, existing_count):
+    """
+    Check if there are actually new articles to process
+    Returns True if new articles exist, False otherwise
+    """
+    if len(current_links) <= existing_count:
+        print(f"No new articles found (Current: {len(current_links)}, Existing: {existing_count})")
+        return False
+    
+    print(f"Found {len(current_links) - existing_count} new articles to process")
+    return True
+
+def load_processed_links():
+    """Load the set of processed links from JSON file"""
+    try:
+        with open("processed_links.json", 'r', encoding='utf-8') as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+def save_processed_links(links_set):
+    """Save the set of processed links to JSON file"""
+    with open("processed_links.json", 'w', encoding='utf-8') as f:
+        json.dump(list(links_set), f, ensure_ascii=False, indent=4)
+
 # Main function
 if __name__ == "__main__":
     rss_url = "https://news.google.com/rss/search?q=gadwal&hl=en-US&gl=US&ceid=US:en"
+    LIMIT_LINKS = 50  # Set limit for top N links
 
-    # Step 1: Load last processed links
-    print("Loading last processed links...")
-    last_processed_links = load_last_processed_links()
-    print(f"Loaded {len(last_processed_links)} processed links.")
+    # Load existing articles and processed links
+    print("Loading existing articles and processed links...")
+    existing_articles = load_existing_articles()
+    processed_links = load_processed_links()
+    print(f"Loaded {len(existing_articles)} existing articles.")
+    print(f"Loaded {len(processed_links)} processed links.")
 
-    # Step 2: Fetch links from RSS
-    print("Fetching links from RSS...")
-    links = get_links_from_rss(rss_url)
-    print(f"Found {len(links)} links.")
+    # Fetch latest top 50 links from RSS
+    print(f"Fetching top {LIMIT_LINKS} links from RSS...")
+    all_links = get_links_from_rss(rss_url, LIMIT_LINKS)
+    print(f"Found {len(all_links)} total links.")
 
-    # Step 3: Decode Google News links
-    print("Decoding Google News URLs...")
-    decoded_links = decode_google_news_links(links)
-    print(f"Decoded {len(decoded_links)} links.")
+    # Filter new links using both title and link checks
+    new_links = [
+        link for link in all_links 
+        if not any(article['title'] == link['title'] for article in existing_articles)
+        and link['link'] not in processed_links
+    ]
+    
+    print(f"Found {len(new_links)} new links to process.")
 
-    # Step 4: Filter out already processed links
-    print("Filtering out already processed links...")
-    new_links = [item for item in decoded_links if item["link"] not in last_processed_links]
-    print(f"Found {len(new_links)} new links.")
+    if not new_links:
+        print("No new articles to process. Exiting...")
+        print("\nFinal Statistics:")
+        print(f"Total articles in database: {len(existing_articles)}")
+        print(f"Total processed links: {len(processed_links)}")
+        print(f"New articles added: 0")
+        exit(0)
 
-    if new_links:
-        # Step 5: Scrape articles from new links
+    # Only decode the new links
+    print(f"Decoding {len(new_links)} new Google News URLs...")
+    decoded_links = decode_google_news_links(new_links)
+    print(f"Successfully decoded {len(decoded_links)} links.")
+
+    if decoded_links:
+        # Scrape articles from new links
         print("Scraping articles from new links...")
-        articles = scrape_articles_from_links(new_links)
+        new_articles = scrape_articles_from_links(decoded_links)
 
-        # Step 6: Save scraped articles to JSON
-        articles_file = "new_articles.json"
-        with open(articles_file, 'w', encoding='utf-8') as f:
-            json.dump(articles, f, ensure_ascii=False, indent=4)
-        print(f"Scraped articles saved to {articles_file}.")
+        if new_articles:
+            # Update processed links before combining articles
+            for link in new_links:
+                processed_links.add(link['link'])
+            
+            # Keep only the latest processed links if exceeding limit
+            if len(processed_links) > LIMIT_LINKS * 2:  # Keep twice the limit for history
+                processed_links = set(sorted(processed_links, reverse=True)[:LIMIT_LINKS])
+            
+            # Save updated processed links
+            save_processed_links(processed_links)
+            print(f"Updated processed links saved. Total: {len(processed_links)}")
 
-        # Step 7: Save articles to XML
-        articles_xml_file = "new_articles.xml"
-        save_articles_to_xml(articles, articles_xml_file)
-        print(f"Scraped articles saved to {articles_xml_file}.")
+            # Combine with existing and keep only top 50
+            all_articles = existing_articles + new_articles
+            
+            # Sort by date and limit to 50
+            all_articles.sort(
+                key=lambda x: datetime.strptime(x["publish_date"], "%Y-%m-%d") 
+                if x.get("publish_date") else datetime.min,
+                reverse=True
+            )
+            all_articles = all_articles[:LIMIT_LINKS]
 
-        # Step 8: Update and save last processed links
-        last_processed_links.extend([item["link"] for item in new_links])
-        save_last_processed_links(last_processed_links)
-        print(f"Last processed links updated and saved.")
+            # Save all articles to JSON
+            articles_file = "new_articles.json"
+            with open(articles_file, 'w', encoding='utf-8') as f:
+                json.dump(all_articles, f, ensure_ascii=False, indent=4)
+            print(f"Articles saved to {articles_file}.")
+
+            # Save to XML
+            articles_xml_file = "new_articles.xml"
+            save_articles_to_xml(all_articles, articles_xml_file)
+            print(f"Articles saved to {articles_xml_file}.")
+
+            print("\nFinal Statistics:")
+            print(f"Total articles in database: {len(all_articles)}")
+            print(f"Total processed links: {len(processed_links)}")
+            print(f"New articles added: {len(new_articles)}")
+        else:
+            print("No articles were successfully scraped.")
     else:
-        print("No new articles found.")
+        print("No links were successfully decoded.")
+
+    # Final statistics even if no new articles were added
+    print("\nFinal Statistics:")
+    print(f"Total articles in database: {len(existing_articles)}")
+    print(f"Total processed links: {len(processed_links)}")
+    print(f"New articles added: {len(new_articles) if 'new_articles' in locals() else 0}")
