@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+last_processed_links.json
+new_articles.json
+new_articles.xml
+.env
+.venv
