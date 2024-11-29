@@ -2,22 +2,22 @@ name: Run News Scraper
 
 on:
   schedule:
-    - cron: '0 */8 * * *'  # Runs every 8 hours
-  workflow_dispatch:  # Allows manual trigger
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Add explicit write permission
+      contents: write
     
     steps:
-    - uses: actions/checkout@v3  # Updated to v3
+    - uses: actions/checkout@v3
       with:
-        fetch-depth: 0  # Fetch all history
+        fetch-depth: 0
     
     - name: Set up Python
-      uses: actions/setup-python@v4  # Updated to v4
+      uses: actions/setup-python@v4
       with:
         python-version: '3.x'
     
@@ -27,22 +27,56 @@ jobs:
         pip install -r requirements.txt
     
     - name: Run scraper
-      run: python feed.py
+      run: |
+        python feed.py
+        # Debug: List files after scraping
+        echo "Files in directory after scraping:"
+        ls -la
+        
+    - name: Debug file contents
+      run: |
+        echo "Checking if files exist and have content:"
+        [ -f "new_articles.json" ] && echo "new_articles.json exists" || echo "new_articles.json missing"
+        [ -f "new_articles.xml" ] && echo "new_articles.xml exists" || echo "new_articles.xml missing"
+        [ -f "last_processed_links.json" ] && echo "last_processed_links.json exists" || echo "last_processed_links.json missing"
+        
+        echo "File sizes:"
+        ls -lh new_articles.json new_articles.xml last_processed_links.json || true
     
     - name: Commit and push changes
       run: |
+        # Debug: Print git status before changes
+        echo "Git status before changes:"
+        git status
+        
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         
-        # Force add the files even if they're in .gitignore
-        git add -f new_articles.json new_articles.xml last_processed_links.json
+        # Remove files from .gitignore tracking
+        git rm --cached new_articles.json new_articles.xml last_processed_links.json || true
         
-        # Check if there are any changes
+        # Force add the files
+        git add -f new_articles.json new_articles.xml last_processed_links.json || echo "Failed to add files"
+        
+        # Debug: Print git status after adding
+        echo "Git status after adding files:"
+        git status
+        
+        # Commit and push if there are changes
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
           git commit -m "Update news articles [automated]"
           git push
+          echo "Changes pushed successfully"
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Final debug
+      if: always()
+      run: |
+        echo "Final repository state:"
+        git status
+        echo "Current directory contents:"
+        ls -la
