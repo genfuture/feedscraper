@@ -10,30 +10,24 @@ import time
 
 # Constants
 LAST_PROCESSED_FILE = "last_processed_links.json"
-ARTICLES_JSON_FILE = "new_articles.json"
-ARTICLES_XML_FILE = "new_articles.xml"
-RSS_FEED_URL = "https://news.google.com/rss/search?q=gadwal&hl=en-US&gl=US&ceid=US:en"
-LIMIT_LINKS = 30  # Analyze top 30 posts
+ARTICLES_JSON_FILE = "articles.json"
+RSS_FEEDS = {
+    "gadwal": "https://news.google.com/rss/search?q=gadwal&hl=en-US&gl=US&ceid=US:en",
+    "raichur": "https://news.google.com/rss/search?q=raichur&hl=en-US&gl=US&ceid=US:en",
+}
+LIMIT_LINKS = 30
 
-def load_existing_articles():
-    """Load existing articles from JSON file."""
+def load_processed_links(feed_name):
+    """Load previously processed links for a specific feed."""
     try:
-        with open(ARTICLES_JSON_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-def load_processed_links():
-    """Load previously processed links."""
-    try:
-        with open(LAST_PROCESSED_FILE, 'r', encoding='utf-8') as f:
+        with open(f"{feed_name}_processed_links.json", 'r', encoding='utf-8') as f:
             return set(json.load(f))
     except (FileNotFoundError, json.JSONDecodeError):
         return set()
 
-def save_processed_links(links_set):
-    """Save processed links to JSON file."""
-    with open(LAST_PROCESSED_FILE, 'w', encoding='utf-8') as f:
+def save_processed_links(feed_name, links_set):
+    """Save processed links for a specific feed."""
+    with open(f"{feed_name}_processed_links.json", 'w', encoding='utf-8') as f:
         json.dump(list(links_set), f, ensure_ascii=False, indent=4)
 
 def get_links_from_rss(feed_url, limit=30):
@@ -87,7 +81,7 @@ def scrape_articles_from_links(links):
             print(f"Error processing {item['link']}: {e}")
     return articles_data
 
-def save_articles_to_xml(articles, filename):
+def save_articles_to_xml(feed_name, articles, filename):
     """Save articles to XML in GitHub Pages-compatible format."""
     # Define namespaces
     namespaces = {
@@ -104,11 +98,11 @@ def save_articles_to_xml(articles, filename):
     
     # Add channel metadata
     title = ET.SubElement(channel, "title")
-    title.text = "Gadwal News Feed"
+    title.text = f"{feed_name.capitalize()} News Feed"
     link = ET.SubElement(channel, "link")
-    link.text = RSS_FEED_URL
+    link.text = RSS_FEEDS[feed_name]
     description = ET.SubElement(channel, "description")
-    description.text = "Latest news about Gadwal"
+    description.text = f"Latest news about {feed_name.capitalize()}"
     language = ET.SubElement(channel, "language")
     language.text = "en-US"
     
@@ -130,7 +124,6 @@ def save_articles_to_xml(articles, filename):
         f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
         tree.write(f, encoding='utf-8', xml_declaration=False)
 
-
 def parse_publish_date(article):
     """Convert publish_date to a datetime object for sorting."""
     publish_date = article.get("publish_date")
@@ -138,43 +131,37 @@ def parse_publish_date(article):
         try:
             return datetime.strptime(publish_date, "%Y-%m-%d")
         except ValueError:
-            pass  # Handle invalid date formats gracefully
-    return datetime.min  # Default to the earliest date for missing/invalid dates
+            pass
+    return datetime.min
 
 if __name__ == "__main__":
-    print("Loading existing data...")
-    existing_articles = load_existing_articles()
-    processed_links = load_processed_links()
+    for feed_name, feed_url in RSS_FEEDS.items():
+        print(f"Processing {feed_name.capitalize()} news feed...")
 
-    print("Fetching RSS feed...")
-    all_links = get_links_from_rss(RSS_FEED_URL, LIMIT_LINKS)
-    new_links = [
-        link for link in all_links
-        if link["link"] not in processed_links and not any(article['title'] == link['title'] for article in existing_articles)
-    ]
+        processed_links = load_processed_links(feed_name)
 
-    if not new_links:
-        print("No new articles to process. Exiting...")
-        exit(0)
+        all_links = get_links_from_rss(feed_url, LIMIT_LINKS)
+        new_links = [
+            link for link in all_links
+            if link["link"] not in processed_links
+        ]
 
-    print("Decoding new links...")
-    decoded_links = decode_google_news_links(new_links)
+        if not new_links:
+            print(f"No new articles for {feed_name}.")
+            continue
 
-    print("Scraping articles...")
-    new_articles = scrape_articles_from_links(decoded_links)
+        decoded_links = decode_google_news_links(new_links)
+        new_articles = scrape_articles_from_links(decoded_links)
 
-    if new_articles:
-        processed_links.update(link['link'] for link in new_links)
-        save_processed_links(processed_links)
+        if new_articles:
+            processed_links.update(link['link'] for link in new_links)
+            save_processed_links(feed_name, processed_links)
 
-        all_articles = existing_articles + new_articles
-        all_articles.sort(key=parse_publish_date, reverse=True)
-        all_articles = all_articles[:LIMIT_LINKS]
+            # Sort by date
+            new_articles.sort(key=parse_publish_date, reverse=True)
 
-        with open(ARTICLES_JSON_FILE, 'w', encoding='utf-8') as f:
-            json.dump(all_articles, f, ensure_ascii=False, indent=4)
-
-        save_articles_to_xml(all_articles, ARTICLES_XML_FILE)
-        print(f"Saved {len(new_articles)} new articles.")
-    else:
-        print("No new articles were successfully scraped.")
+            # Save to XML
+            save_articles_to_xml(feed_name, new_articles, f"{feed_name}.xml")
+            print(f"Saved {len(new_articles)} new articles for {feed_name} to {feed_name}.xml.")
+        else:
+            print(f"No articles were successfully scraped for {feed_name}.")
