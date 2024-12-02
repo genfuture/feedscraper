@@ -89,8 +89,20 @@ def scrape_articles_from_links(links):
 
 def save_articles_to_xml(articles, filename):
     """Save articles to XML in GitHub Pages-compatible format."""
-    rss = ET.Element("rss", version="2.0")
+    # Define namespaces
+    namespaces = {
+        "media": "http://search.yahoo.com/mrss/"
+    }
+    
+    # Register namespaces
+    for prefix, uri in namespaces.items():
+        ET.register_namespace(prefix, uri)
+    
+    # Create the root RSS element with namespaces
+    rss = ET.Element("rss", version="2.0", nsmap=namespaces)
     channel = ET.SubElement(rss, "channel")
+    
+    # Add channel metadata
     title = ET.SubElement(channel, "title")
     title.text = "Gadwal News Feed"
     link = ET.SubElement(channel, "link")
@@ -110,12 +122,14 @@ def save_articles_to_xml(articles, filename):
         if article.get("author"):
             ET.SubElement(item, "author").text = ", ".join(article["author"])
         if article.get("top_image"):
-            ET.SubElement(item, "media:content", url=article["top_image"], medium="image", xmlns="http://search.yahoo.com/mrss/")
+            ET.SubElement(item, f"{{{namespaces['media']}}}content", url=article["top_image"], medium="image")
 
+    # Write XML to file
     tree = ET.ElementTree(rss)
     with open(filename, 'wb') as f:
         f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
         tree.write(f, encoding='utf-8', xml_declaration=False)
+
 
 def parse_publish_date(article):
     """Convert publish_date to a datetime object for sorting."""
