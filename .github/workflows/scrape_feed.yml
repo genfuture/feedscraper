@@ -11,34 +11,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Step 1: Checkout the repository
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Step 2: Set up Python environment
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: 3.9
 
-    # Step 3: Install dependencies
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Step 4: Run the feed scraper script
     - name: Run feed scraper
-      run: |
-        python feed.py
+      run: python feed.py
 
-    # Step 5: Log the latest post
     - name: Display latest post
       run: |
         echo "Latest Post:" $(jq -r '.[0].title' new_articles.json)
 
-    # Step 6: Commit and push updates
     - name: Commit and push updates
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
